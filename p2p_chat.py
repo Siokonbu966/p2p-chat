@@ -9,6 +9,9 @@ HOST = '0.0.0.0'
 PORT = 8080
 BUFFER_SIZE = 1024
 
+# 停止
+stop_event = threading.Event()
+
 def start_server(port):
     """
     サーバーとして動作し、接続を待ち受けます。
@@ -50,32 +53,70 @@ def receive_messages(conn):
     接続からメッセージを受信し、画面に表示します。
     """
     try:
-        while True:
+        while not stop_event.is_set():
             data = conn.recv(BUFFER_SIZE)
             if not data:
                 print("接続が切断されました。")
+                stop_event.set()
                 break
-            print(f"\n>> {data.decode('utf-8')}")
+            text = data.decode('utf-8').strip()
+            if text in ('/exit'):
+                print("\n>> 相手がチャットを終了しました。")
+                stop_event.set()
+                try:
+                    conn.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                break
+            print(f"\n>> {text}")
     except socket.error as e:
         print(f"受信エラー: {e}")
     finally:
-        conn.close()
+        try:
+            conn.close()
+        except OSError:
+            pass
 
 def send_messages(conn):
     """
     ユーザーの入力を受け付け、接続に送信します。
     """
     try:
-        while True:
-            message = input(">> ")
+        while not stop_event.is_set():
+            message = input(">> ").strip()
+            if not message:
+                continue
+            if message in ('/exit'):
+                try:
+                    conn.sendall(message.encode('utf-8'))
+                except socket.error:
+                    # 相手がすでに終了している可能性を無視して終了
+                    pass
+                stop_event.set()
+                break
+            try:
+                conn.sendall(message.encode('utf-8'))
+            except socket.error as e:
+                print(f"送信エラー: {e}")
+                stop_event.set()
+                break
             if message.lower() == 'exit':
                 break
             conn.sendall(message.encode('utf-8'))
     except (socket.error, KeyboardInterrupt) as e:
         print(f"送信エラーまたはユーザーによる中断: {e}")
     finally:
-        conn.close()
+        try:
+            conn.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        try:
+            conn.close()
+        except OSError:
+            pass
         sys.exit(0)
+
+
 
 def main():
     """
@@ -102,6 +143,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-# ```
-# eof
-# ---
